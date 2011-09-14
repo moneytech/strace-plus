@@ -2687,6 +2687,30 @@ static void print_normalized_addr(struct tcb* tcp, unsigned long addr) {
 }
 
 
+// use libunwind to unwind the stack and print a backtrace:
+void print_libunwind_backtrace(struct tcb* tcp) {
+  unw_word_t ip;
+  int n = 0, ret;
+  unw_cursor_t c;
+
+  extern unw_addr_space_t libunwind_as;
+  EXITIF(unw_init_remote(&c, libunwind_as, tcp->libunwind_ui) < 0);
+  do {
+    EXITIF(unw_get_reg(&c, UNW_REG_IP, &ip) < 0);
+
+    print_normalized_addr(tcp, ip);
+
+    ret = unw_step(&c);
+
+    if (++n > 255) {
+      /* guard against bad unwind info in old libraries... */
+      fprintf(stderr, "libunwind warning: too deeply nested---assuming bogus unwind\n");
+      break;
+    }
+  } while (ret > 0);
+}
+
+
 static int
 trace_syscall_entering(struct tcb *tcp)
 {
@@ -2824,8 +2848,9 @@ trace_syscall_entering(struct tcb *tcp)
 	}
 
 
-  // pgbovine - walk up the stack and print out return addresses:
-  //   personality_wordsize[current_personality] is the wordsize for the target process
+  // pgbovine - walk up the stack and print out return addresses
+
+  extern int use_libunwind;
 
   struct user_regs_struct cur_regs;
   EXITIF(ptrace(PTRACE_GETREGS, tcp->pid, NULL, (long)&cur_regs) < 0);
@@ -2835,38 +2860,59 @@ trace_syscall_entering(struct tcb *tcp)
     alloc_mmap_cache(tcp);
   }
 
-  // TODO: add an explicit option to use libunwind or stack crawling,
-  //       and then test stack crawling on an OLDER 64-bit Linux distro within
-  //       VirtualBox to see whether it actually works
+
+  tprintf("[ "); // opening brace for stack trace
 
 #if defined (I386)
 
-  tprintf("[ ");
-
-  // first print your current instruction pointer ...
-  print_normalized_addr(tcp, (unsigned long)cur_regs.eip);
-
-  // then crawl up the stack ...
-  unsigned long cur_ebp = (unsigned long)cur_regs.ebp;
-  unsigned long retaddr = 0;
-  int ret = 0;
-  while (ret == 0 && cur_ebp != 0) {
-    // return address is always at EBP + <word size>
-    ret = umoven(tcp,
-                 (long)cur_ebp + personality_wordsize[current_personality],
-                 personality_wordsize[current_personality],
-                 (void*)&retaddr);
-
-    print_normalized_addr(tcp, retaddr);
-
-    // the current EBP points to the EBP of the next frame up on the stack
-    ret = umoven(tcp, (long)cur_ebp, personality_wordsize[current_personality], (void*)&cur_ebp);
+  if (use_libunwind) {
+    // use libunwind to unwind the stack, which works even for code compiled
+    // without a frame pointer, but is relatively SLOW
+    print_libunwind_backtrace(tcp);
   }
-  tprintf("] ");
+  else {
+    // Crawl up the stack using frame pointers, which is relatively FAST but
+    // requires all user and library code to be compiled with a frame pointer
+
+    // Note that personality_wordsize[current_personality] is the wordsize for
+    // the target process (e.g., 4 bytes or 8 bytes)
+
+    // first print your current instruction pointer ...
+    print_normalized_addr(tcp, (unsigned long)cur_regs.eip);
+
+    // then crawl up the stack ...
+    unsigned long cur_ebp = (unsigned long)cur_regs.ebp;
+    unsigned long retaddr = 0;
+    int ret = 0;
+    while (ret == 0 && cur_ebp != 0) {
+      // return address is always at EBP + <word size>
+      ret = umoven(tcp,
+                   (long)cur_ebp + personality_wordsize[current_personality],
+                   personality_wordsize[current_personality],
+                   (void*)&retaddr);
+
+      print_normalized_addr(tcp, retaddr);
+
+      // the current EBP points to the EBP of the next frame up on the stack
+      ret = umoven(tcp, (long)cur_ebp, personality_wordsize[current_personality], (void*)&cur_ebp);
+    }
+  }
 
 #elif defined(X86_64)
-  if (IS_32BIT_EMU) {
-    tprintf("[ ");
+
+  // a 64-bit version of libunwind can't parse 32-bit binaries, so we MUST
+  // resort to using stack crawling when tracking a 32-bit binary:
+  if (IS_32BIT_EMU || !use_libunwind) {
+    // Crawl up the stack using frame pointers, which is relatively FAST but
+    // requires all user and library code to be compiled with a frame pointer
+
+    // Note that personality_wordsize[current_personality] is the wordsize for
+    // the target process (e.g., 4 bytes or 8 bytes)
+
+    // first print your current instruction pointer ...
+    print_normalized_addr(tcp, (unsigned long)cur_regs.rip);
+
+    // then crawl up the stack ...
     unsigned long cur_ebp = (unsigned long)cur_regs.rbp;
     unsigned long retaddr = 0;
     int ret = 0;
@@ -2882,41 +2928,18 @@ trace_syscall_entering(struct tcb *tcp)
       // the current EBP points to the EBP of the next frame up on the stack
       ret = umoven(tcp, (long)cur_ebp, personality_wordsize[current_personality], (void*)&cur_ebp);
     }
-    tprintf("] ");
   }
   else {
-    // pgbovine - use libunwind to unwind the stack, which works even if the
-    // target program is compiled without a frame pointer :)
-
-    tprintf("[ ");
-
-    unw_word_t ip;
-    int n = 0, ret;
-    unw_cursor_t c;
-
-    extern unw_addr_space_t libunwind_as;
-    EXITIF(unw_init_remote(&c, libunwind_as, tcp->libunwind_ui) < 0);
-    do {
-      EXITIF(unw_get_reg(&c, UNW_REG_IP, &ip) < 0);
-
-      print_normalized_addr(tcp, ip);
-
-      ret = unw_step(&c);
-
-      if (++n > 255) {
-        /* guard against bad unwind info in old libraries... */
-        fprintf(stderr, "libunwind warning: too deeply nested---assuming bogus unwind\n");
-        break;
-      }
-    } while (ret > 0);
-
-
-    tprintf("] ");
+    // use libunwind
+    print_libunwind_backtrace(tcp);
   }
 
 #else
   #error "Unknown architecture (not I386 or X86_64)"
 #endif
+
+  tprintf("] "); // closing brace for stack trace
+
 
 	printleader(tcp);
 	tcp->flags &= ~TCB_REPRINT;

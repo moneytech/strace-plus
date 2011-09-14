@@ -167,6 +167,13 @@ static int proc_poll_pipe[2] = { -1, -1 };
 #endif
 #endif /* USE_PROCFS */
 
+
+// pgbovine - if this is 0, then use a manual stack walking technique rather
+// than libunwind, which is FASTER but requires a frame pointer to exist in ALL
+// user and library code.  Set to 1 by default.
+int use_libunwind = 1;
+
+
 static void
 usage(ofp, exitval)
 FILE *ofp;
@@ -203,6 +210,11 @@ usage: strace+ [-CdDffhiqrtttTvVxx] [-a column] [-e expr] ... [-o file]\n\
 -u username -- run command as username handling setuid and/or setgid\n\
 -E var=val -- put var=val in the environment for command\n\
 -E var -- remove var from the environment for command\n\
+\n\
+\n\
+Special strace+ options:\n\
+-w -- obtain stack trace by walking up the frame pointer chain\n\
+      rather than using libunwind (FASTER but requires frame pointers!)\n\
 " /* this is broken, so don't document it
 -z -- print only succeeding syscalls\n\
   */
@@ -775,10 +787,12 @@ main(int argc, char *argv[])
 
 
         // pgbovine - libunwind support:
-        libunwind_as = unw_create_addr_space (&_UPT_accessors, 0);
-        if (!libunwind_as) {
-          fprintf(stderr, "Fatal error: unw_create_addr_space() from libunwind failed\n");
-          exit(1);
+        if (use_libunwind) {
+          libunwind_as = unw_create_addr_space (&_UPT_accessors, 0);
+          if (!libunwind_as) {
+            fprintf(stderr, "Fatal error: unw_create_addr_space() from libunwind failed\n");
+            exit(1);
+          }
         }
 
 
@@ -808,7 +822,7 @@ main(int argc, char *argv[])
 	qualify("verbose=all");
 	qualify("signal=all");
 	while ((c = getopt(argc, argv,
-		"+cCdfFhiqrtTvVxz"
+		"+cCdfFhiqrtTvVxzw"
 #ifndef USE_PROCFS
 		"D"
 #endif
@@ -916,6 +930,10 @@ main(int argc, char *argv[])
 			break;
 		case 'u':
 			username = strdup(optarg);
+			break;
+		case 'w':
+                        // pgbovine - disable libunwind
+			use_libunwind = 0;
 			break;
 		case 'E':
 			if (putenv(optarg) < 0) {
@@ -1143,7 +1161,9 @@ alloc_tcb(int pid, int command_options_parsed)
                         tcp->mmap_cache = NULL; // pgbovine
                         tcp->mmap_cache_size = 0; // pgbovine
 
-                        tcp->libunwind_ui = _UPT_create(tcp->pid); // pgbovine
+                        if (use_libunwind) {
+                          tcp->libunwind_ui = _UPT_create(tcp->pid); // pgbovine
+                        }
 
 			nprocs++;
 			if (command_options_parsed)
@@ -1559,7 +1579,10 @@ struct tcb *tcp;
 	tcp->outf = 0;
 
         delete_mmap_cache(tcp); // pgbovine
-        _UPT_destroy(tcp->libunwind_ui);  // pgbovine
+
+        if (use_libunwind) {
+          _UPT_destroy(tcp->libunwind_ui);  // pgbovine
+        }
 }
 
 #ifndef USE_PROCFS
