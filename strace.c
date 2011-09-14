@@ -82,6 +82,10 @@ extern int optind;
 extern char *optarg;
 
 
+// integrate libunwind into strace ... from libunwind-1.0/tests/test-ptrace.c
+unw_addr_space_t libunwind_as;
+
+
 int debug = 0, followfork = 0;
 unsigned int ptrace_setoptions = 0;
 int dtime = 0, xflag = 0, qflag = 0;
@@ -169,11 +173,14 @@ FILE *ofp;
 int exitval;
 {
 	fprintf(ofp, "\
-usage: strace [-CdDffhiqrtttTvVxx] [-a column] [-e expr] ... [-o file]\n\
-              [-p pid] ... [-s strsize] [-u username] [-E var=val] ...\n\
-              [command [arg ...]]\n\
-   or: strace -c [-D] [-e expr] ... [-O overhead] [-S sortby] [-E var=val] ...\n\
-              [command [arg ...]]\n\
+strace+: An improved version of strace that collects stack traces\n\
+Copyright (c) 2011 Philip Guo <pg@cs.stanford.edu>\n\
+\n\
+usage: strace+ [-CdDffhiqrtttTvVxx] [-a column] [-e expr] ... [-o file]\n\
+               [-p pid] ... [-s strsize] [-u username] [-E var=val] ...\n\
+               [command [arg ...]]\n\
+   or: strace+ -c [-D] [-e expr] ... [-O overhead] [-S sortby] [-E var=val] ...\n\
+               [command [arg ...]]\n\
 -c -- count time, calls, and errors for each syscall and report summary\n\
 -C -- like -c but also print regular output while processes are running\n\
 -f -- follow forks, -ff -- with output into separate files\n\
@@ -766,6 +773,15 @@ main(int argc, char *argv[])
 	int optF = 0;
 	struct sigaction sa;
 
+
+        // pgbovine - libunwind support:
+        libunwind_as = unw_create_addr_space (&_UPT_accessors, 0);
+        if (!libunwind_as) {
+          fprintf(stderr, "Fatal error: unw_create_addr_space() from libunwind failed\n");
+          exit(1);
+        }
+
+
 	static char buf[BUFSIZ];
 
 	progname = argv[0] ? argv[0] : "strace";
@@ -1123,6 +1139,12 @@ alloc_tcb(int pid, int command_options_parsed)
 			tcp->stime.tv_sec = 0;
 			tcp->stime.tv_usec = 0;
 			tcp->pfd = -1;
+
+                        tcp->mmap_cache = NULL; // pgbovine
+                        tcp->mmap_cache_size = 0; // pgbovine
+
+                        tcp->libunwind_ui = _UPT_create(tcp->pid); // pgbovine
+
 			nprocs++;
 			if (command_options_parsed)
 				newoutf(tcp);
@@ -1535,6 +1557,9 @@ struct tcb *tcp;
 		fclose(tcp->outf);
 
 	tcp->outf = 0;
+
+        delete_mmap_cache(tcp); // pgbovine
+        _UPT_destroy(tcp->libunwind_ui);  // pgbovine
 }
 
 #ifndef USE_PROCFS

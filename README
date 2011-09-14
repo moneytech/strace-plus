@@ -1,3 +1,52 @@
+strace+: An improved version of strace that collects stack traces
+
+Copyright (c) 2011 Philip Guo <pg@cs.stanford.edu>
+
+This project is hosted at http://code.google.com/p/strace-plus/
+
+
+Quick-start guide:
+
+1. Compile strace+
+
+  ./configure && make
+
+2. Compile a "hello world" test program
+
+  gcc examples/hello.c -o hello
+
+3. Run strace+ on 'hello' to generate a hello.out strace file
+
+  ./strace+ -o hello.out ./hello
+
+4. Post-process hello.out to print out a syscall trace augmented with
+   stack traces (requires python >= 2.6, gdb, and file to be installed)
+
+  python scripts/pretty_print_strace_out.py hello.out --trace
+
+---
+
+To build a 32-bit strace+ executable on an x86-64 machine, use:
+
+  CFLAGS=-m32 ./configure --build=i686-pc-linux-gnu
+
+
+strace+ is built upon strace 4.6. and libunwind 1.0
+
+  - strace-4.6.tar.gz contains the original strace 4.6 source files.
+
+  - libunwind-1.0.tar.gz contains the original libunwind source files.
+    - The ./configure step untars and expands this file into
+      libunwind-1.0/ and then 'make' will compile its contents into a
+      static library
+
+    - To get libunwind to compile on some distros, you need to use:
+      ./configure CFLAGS=-U_FORTIFY_SOURCE
+
+
+This is the original strace 4.6 README file:
+---
+
 This is strace 4.0, a system call tracer for SunOS 4.x, Linux, System
 V release 4, Solaris 2.x and Irix 5.x.  strace is released under a
 Berkeley-style license at the request of Paul Kranenburg; see the file

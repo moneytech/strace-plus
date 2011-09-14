@@ -38,7 +38,8 @@ PRE_UNINSTALL = :
 POST_UNINSTALL = :
 build_triplet = @build@
 host_triplet = @host@
-bin_PROGRAMS = strace$(EXEEXT)
+# pgbovine - rename binary to strace+
+bin_PROGRAMS = strace+$(EXEEXT)
 @LINUX_TRUE@@MAINTAINER_MODE_TRUE@am__append_1 = $(ioctlent_h_in)
 @LINUX_TRUE@am__append_2 = $(ioctlent_h)
 subdir = .
@@ -280,11 +281,31 @@ OS = @opsys@
 ARCH = @arch@
 ACLOCAL_AMFLAGS = -I m4
 AM_CFLAGS = $(WARN_CFLAGS)
-AM_CPPFLAGS = -I$(srcdir)/$(OS)/$(ARCH) -I$(srcdir)/$(OS) -I$(builddir)/$(OS)
+# pgbovine - add libunwind-1.0 directory
+AM_CPPFLAGS = -I$(srcdir)/$(OS)/$(ARCH) -I$(srcdir)/$(OS) -I$(builddir)/$(OS) -Ilibunwind-1.0/include
 strace_SOURCES = strace.c syscall.c count.c util.c desc.c file.c ipc.c \
 		 io.c ioctl.c mem.c net.c process.c bjm.c quota.c \
 		 resource.c signal.c sock.c system.c term.c time.c \
                 proc.c scsi.c stream.c block.c
+
+
+# pgbovine - add libunwind support - statically link the relevant
+# libunwind .a files in the proper order, and then tell the linker to
+# switch back to dynamic linking for the rest of the libraries:
+
+# arch-specific:
+ifeq ($(ARCH),x86_64)
+  LUNWIND_X86_LIB = -lunwind-x86_64
+else
+  ifeq ($(ARCH),i386)
+    LUNWIND_X86_LIB = -lunwind-x86
+  else
+    LUNWIND_X86_LIB = -lUNSUPPORTED_ARCHITECTURE
+  endif
+endif
+
+LIBUNWIND_LIBS = -L libunwind-1.0/src/.libs/ -L libunwind-1.0/src -Wl,-Bstatic -lunwind-ptrace $(LUNWIND_X86_LIB) -lunwind -Wl,-Bdynamic
+
 
 noinst_HEADERS = defs.h
 EXTRA_DIST = $(man_MANS) errnoent.sh signalent.sh syscallent.sh ioctlsort.c \
@@ -368,7 +389,10 @@ BUILT_SOURCES = $(am__append_1) $(am__append_2)
 @LINUX_TRUE@ioctlent_h = $(builddir)/$(OS)/ioctlent.h
 @LINUX_TRUE@CLEANFILES = $(ioctlent_h)
 @LINUX_TRUE@ioctlent_h_deps = $(srcdir)/$(OS)/ioctlent.h.in $(srcdir)/$(OS)/$(ARCH)/ioctlent.h.in
-all: $(BUILT_SOURCES) config.h
+
+
+# pgbovine - add an explicit libunwind dependency to force it to build first
+all: $(BUILT_SOURCES) config.h libunwind-1.0/src/libunwind-ptrace.a
 	$(MAKE) $(AM_MAKEFLAGS) all-recursive
 
 .SUFFIXES:
@@ -461,9 +485,11 @@ uninstall-binPROGRAMS:
 
 clean-binPROGRAMS:
 	-test -z "$(bin_PROGRAMS)" || rm -f $(bin_PROGRAMS)
-strace$(EXEEXT): $(strace_OBJECTS) $(strace_DEPENDENCIES) 
+
+# pgbovine - rename binary to strace+ and add a libunwind dependency
+strace+$(EXEEXT): $(strace_OBJECTS) $(strace_DEPENDENCIES)
 	@rm -f strace$(EXEEXT)
-	$(AM_V_CCLD)$(LINK) $(strace_OBJECTS) $(strace_LDADD) $(LIBS)
+	$(AM_V_CCLD)$(LINK) $(strace_OBJECTS) $(strace_LDADD) $(LIBS) $(LIBUNWIND_LIBS)
 install-binSCRIPTS: $(bin_SCRIPTS)
 	@$(NORMAL_INSTALL)
 	test -z "$(bindir)" || $(MKDIR_P) "$(DESTDIR)$(bindir)"
@@ -948,6 +974,7 @@ maintainer-clean-generic:
 	@echo "it deletes files that may require special tools to rebuild."
 	-test -z "$(BUILT_SOURCES)" || rm -f $(BUILT_SOURCES)
 clean: clean-recursive
+	rm -rf libunwind-1.0/ # pgbovine - also delete libunwind
 
 clean-am: clean-binPROGRAMS clean-generic mostlyclean-am
 
@@ -1089,3 +1116,13 @@ srpm: dist-xz
 # Tell versions [3.59,3.63) of GNU make to not export all variables.
 # Otherwise a system limit (for SysV at least) may be exceeded.
 .NOEXPORT:
+
+
+# pgbovine - for some reason, you need to move these lines to the BOTTOM
+# of the file for it to work properly :0
+libunwind-1.0/src/libunwind-ptrace.a: libunwind-1.0
+	cd libunwind-1.0/ && ./configure CFLAGS=-U_FORTIFY_SOURCE && make
+
+# create the libunwind-1.0 if it doesn't yet exist
+libunwind-1.0:
+	tar -zxvf libunwind-1.0.tar.gz

@@ -339,6 +339,42 @@ extern int mp_ioctl (int f, int c, void *a, int s);
 # endif
 #endif /* LINUX */
 
+
+// pgbovine - put this #include as LATE in the file as possible, or else there
+// might be #include conflicts
+#include "libunwind-ptrace.h"
+
+// pgbovine
+// like an assert except that it always fires
+#define EXITIF(x) do { \
+  if (x) { \
+    fprintf(stderr, "Fatal error in %s [%s:%d]\n", __FUNCTION__, __FILE__, __LINE__); \
+    exit(1); \
+  } \
+} while(0)
+
+#if defined(X86_64)
+// current_personality == 1 means that a 64-bit cde-exec is actually tracking a
+// 32-bit target process at the moment:
+#define IS_32BIT_EMU (current_personality == 1)
+#endif
+
+// pgbovine - keep a sorted array of cache entries, so that we can binary search
+// through it
+struct mmap_cache_t {
+  // example entry:
+  // 7fabbb09b000-7fabbb09f000 r--p 00179000 fc:00 1180246 /lib/libc-2.11.1.so
+  //
+  // start_addr  is 0x7fabbb09b000
+  // end_addr    is 0x7fabbb09f000
+  // mmap_offset is 0x179000
+  // binary_filename is "/lib/libc-2.11.1.so"
+  unsigned long start_addr;
+  unsigned long end_addr;
+  unsigned long mmap_offset;
+  char* binary_filename;
+};
+
 /* Trace Control Block */
 struct tcb {
 	short flags;		/* See below for TCB_ values */
@@ -388,7 +424,20 @@ struct tcb {
 	int pfd_reg;
 	int pfd_status;
 #endif
+
+  // new fields added by pgbovine
+
+  // keep a cache of /proc/<pid>/mmap contents to avoid unnecessary file reads
+  struct mmap_cache_t* mmap_cache;
+  int mmap_cache_size;
+
+  struct UPT_info* libunwind_ui; // for libunwind
 };
+
+// pgbovine
+void alloc_mmap_cache(struct tcb* tcp);
+void delete_mmap_cache(struct tcb* tcp);
+
 
 /* TCB flags */
 #define TCB_STARTUP	00001	/* We have just begun ptracing this process */

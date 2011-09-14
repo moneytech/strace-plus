@@ -332,7 +332,14 @@ struct tcb *tcp;
 #if defined(LINUX_MIPSN32)
 	offset = tcp->ext_arg[5];
 #endif
-	return print_mmap(tcp, tcp->u_arg, offset);
+	int ret = print_mmap(tcp, tcp->u_arg, offset);
+
+  // pgbovine
+  if (!entering(tcp)) {
+    delete_mmap_cache(tcp);
+  }
+
+  return ret;
 }
 #endif /* !HAVE_LONG_LONG_OFF_T */
 
@@ -392,6 +399,12 @@ struct tcb *tcp;
 		tprintf("%#lx, %lu",
 			tcp->u_arg[0], tcp->u_arg[1]);
 	}
+
+  // pgbovine
+  if (!entering(tcp)) {
+    delete_mmap_cache(tcp);
+  }
+
 	return 0;
 }
 
@@ -404,6 +417,12 @@ struct tcb *tcp;
 			tcp->u_arg[0], tcp->u_arg[1]);
 		printflags(mmap_prot, tcp->u_arg[2], "PROT_???");
 	}
+
+  // pgbovine
+  if (!entering(tcp)) {
+    delete_mmap_cache(tcp);
+  }
+
 	return 0;
 }
 
