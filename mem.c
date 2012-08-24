@@ -308,12 +308,11 @@ sys_mmap(struct tcb *tcp)
 #endif
 	int ret = print_mmap(tcp, tcp->u_arg, offset);
 
-  // pgbovine
-  if (!entering(tcp)) {
-    delete_mmap_cache(tcp);
-  }
+	if (!entering(tcp)) {
+		delete_mmap_cache(tcp);
+	}
 
-  return ret;
+	return ret;
 }
 #endif /* !HAVE_LONG_LONG_OFF_T */
 
@@ -412,10 +411,9 @@ sys_munmap(struct tcb *tcp)
 			tcp->u_arg[0], tcp->u_arg[1]);
 	}
 
-  // pgbovine
-  if (!entering(tcp)) {
-    delete_mmap_cache(tcp);
-  }
+	if (!entering(tcp)) {
+		delete_mmap_cache(tcp);
+	}
 
 	return 0;
 }
@@ -429,10 +427,9 @@ sys_mprotect(struct tcb *tcp)
 		printflags(mmap_prot, tcp->u_arg[2], "PROT_???");
 	}
 
-  // pgbovine
-  if (!entering(tcp)) {
-    delete_mmap_cache(tcp);
-  }
+	if (!entering(tcp)) {
+		delete_mmap_cache(tcp);
+	}
 
 	return 0;
 }

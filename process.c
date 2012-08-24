@@ -931,10 +931,9 @@ sys_execve(struct tcb *tcp)
 		}
 	}
 
-  // pgbovine
-  if (!entering(tcp)) {
-    delete_mmap_cache(tcp);
-  }
+	if (!entering(tcp)) {
+		delete_mmap_cache(tcp);
+	}
 
 	return 0;
 }

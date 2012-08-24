@@ -324,12 +324,11 @@ extern long ia32;
 #endif
 
 
-// pgbovine - put this #include as LATE in the file as possible, or else there
-// might be #include conflicts
+// put this #include as LATE in the file as possible, or else there might be
+// include conflicts
 #include "libunwind-ptrace.h"
 
-// pgbovine
-// like an assert except that it always fires
+// like an assert except that it always fires, even in release builds
 #define EXITIF(x) do { \
   if (x) { \
     fprintf(stderr, "Fatal error in %s [%s:%d]\n", __FUNCTION__, __FILE__, __LINE__); \
@@ -343,8 +342,8 @@ extern long ia32;
 #define IS_32BIT_EMU (current_personality == 1)
 #endif
 
-// pgbovine - keep a sorted array of cache entries, so that we can binary search
-// through it
+// keep a sorted array of cache entries, so that we can binary search through
+// it
 struct mmap_cache_t {
   // example entry:
   // 7fabbb09b000-7fabbb09f000 r--p 00179000 fc:00 1180246 /lib/libc-2.11.1.so
@@ -386,16 +385,12 @@ struct tcb {
 				/* Support for tracing forked processes: */
 	long inst[2];		/* Saved clone args (badly named) */
 
-	// new fields added by pgbovine
+	struct mmap_cache_t* mmap_cache; /* Cache of /proc/<pid>/mmap contents */
+	int mmap_cache_size;    /* The size of the cache */
 
-	// keep a cache of /proc/<pid>/mmap contents to avoid unnecessary file reads
-	struct mmap_cache_t* mmap_cache;
-	int mmap_cache_size;
-
-	struct UPT_info* libunwind_ui; // for libunwind
+	struct UPT_info* libunwind_ui; /* For libunwind */
 };
 
-// pgbovine
 void alloc_mmap_cache(struct tcb* tcp);
 void delete_mmap_cache(struct tcb* tcp);
 

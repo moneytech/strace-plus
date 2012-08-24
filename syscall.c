@@ -1496,7 +1496,8 @@ get_syscall_args(struct tcb *tcp)
 	return 1;
 }
 
-static void print_normalized_addr(struct tcb* tcp, unsigned long addr);
+static void
+print_normalized_addr(struct tcb* tcp, unsigned long addr);
 
 static int
 trace_syscall_entering(struct tcb *tcp)
@@ -1572,98 +1573,97 @@ trace_syscall_entering(struct tcb *tcp)
 	}
 
 
-  // pgbovine - walk up the stack and print out return addresses:
-  //   personality_wordsize[current_personality] is the wordsize for the target process
+	// walk up the stack and print out return addresses:
+	//   personality_wordsize[current_personality] is the wordsize for the target process
 
-  struct user_regs_struct cur_regs;
-  EXITIF(ptrace(PTRACE_GETREGS, tcp->pid, NULL, (long)&cur_regs) < 0);
+	struct user_regs_struct cur_regs;
+	EXITIF(ptrace(PTRACE_GETREGS, tcp->pid, NULL, (long)&cur_regs) < 0);
 
-  // caching for efficiency ...
-  if (!tcp->mmap_cache) {
-    alloc_mmap_cache(tcp);
-  }
+	// caching for efficiency ...
+	if (!tcp->mmap_cache) {
+		alloc_mmap_cache(tcp);
+	}
 
-  // TODO: add an explicit option to use libunwind or stack crawling,
-  //       and then test stack crawling on an OLDER 64-bit Linux distro within
-  //       VirtualBox to see whether it actually works
+	// TODO: add an explicit option to use libunwind or stack crawling,
+	//       and then test stack crawling on an OLDER 64-bit Linux distro within
+	//       VirtualBox to see whether it actually works
 
 #if defined (I386)
 
-  tprintf("[ ");
+	tprintf("[ ");
 
-  // first print your current instruction pointer ...
-  print_normalized_addr(tcp, (unsigned long)cur_regs.eip);
+	// first print your current instruction pointer ...
+	print_normalized_addr(tcp, (unsigned long)cur_regs.eip);
 
-  // then crawl up the stack ...
-  unsigned long cur_ebp = (unsigned long)cur_regs.ebp;
-  unsigned long retaddr = 0;
-  int ret = 0;
-  while (ret == 0 && cur_ebp != 0) {
-    // return address is always at EBP + <word size>
-    ret = umoven(tcp,
-                 (long)cur_ebp + personality_wordsize[current_personality],
-                 personality_wordsize[current_personality],
-                 (void*)&retaddr);
+	// then crawl up the stack ...
+	unsigned long cur_ebp = (unsigned long)cur_regs.ebp;
+	unsigned long retaddr = 0;
+	int ret = 0;
+	while (ret == 0 && cur_ebp != 0) {
+		// return address is always at EBP + <word size>
+		ret = umoven(tcp,
+		             (long)cur_ebp + personality_wordsize[current_personality],
+		             personality_wordsize[current_personality],
+		             (void*)&retaddr);
 
-    print_normalized_addr(tcp, retaddr);
+		print_normalized_addr(tcp, retaddr);
 
-    // the current EBP points to the EBP of the next frame up on the stack
-    ret = umoven(tcp, (long)cur_ebp, personality_wordsize[current_personality], (void*)&cur_ebp);
-  }
-  tprintf("] ");
+		// the current EBP points to the EBP of the next frame up on the stack
+		ret = umoven(tcp, (long)cur_ebp, personality_wordsize[current_personality], (void*)&cur_ebp);
+	}
+	tprintf("] ");
 
 #elif defined(X86_64)
-  if (IS_32BIT_EMU) {
-    tprintf("[ ");
-    unsigned long cur_ebp = (unsigned long)cur_regs.rbp;
-    unsigned long retaddr = 0;
-    int ret = 0;
-    while (ret == 0 && cur_ebp != 0) {
-      // return address is always at RBP + <word size>
-      ret = umoven(tcp,
-                   (long)cur_ebp + personality_wordsize[current_personality],
-                   personality_wordsize[current_personality],
-                   (void*)&retaddr);
+	if (IS_32BIT_EMU) {
+		tprintf("[ ");
+		unsigned long cur_ebp = (unsigned long)cur_regs.rbp;
+		unsigned long retaddr = 0;
+		int ret = 0;
+		while (ret == 0 && cur_ebp != 0) {
+			// return address is always at RBP + <word size>
+			ret = umoven(tcp,
+			             (long)cur_ebp + personality_wordsize[current_personality],
+			             personality_wordsize[current_personality],
+			             (void*)&retaddr);
 
-      print_normalized_addr(tcp, retaddr);
+			print_normalized_addr(tcp, retaddr);
 
-      // the current EBP points to the EBP of the next frame up on the stack
-      ret = umoven(tcp, (long)cur_ebp, personality_wordsize[current_personality], (void*)&cur_ebp);
-    }
-    tprintf("] ");
-  }
-  else {
-    // pgbovine - use libunwind to unwind the stack, which works even if the
-    // target program is compiled without a frame pointer :)
+			// the current EBP points to the EBP of the next frame up on the stack
+			ret = umoven(tcp, (long)cur_ebp, personality_wordsize[current_personality], (void*)&cur_ebp);
+		}
+		tprintf("] ");
+	} else {
+		// use libunwind to unwind the stack, which works even if the
+		// target program is compiled without a frame pointer :)
 
-    tprintf("[ ");
+		tprintf("[ ");
 
-    unw_word_t ip;
-    int n = 0, ret;
-    unw_cursor_t c;
+		unw_word_t ip;
+		int n = 0, ret;
+		unw_cursor_t c;
 
-    extern unw_addr_space_t libunwind_as;
-    EXITIF(unw_init_remote(&c, libunwind_as, tcp->libunwind_ui) < 0);
-    do {
-      EXITIF(unw_get_reg(&c, UNW_REG_IP, &ip) < 0);
+		extern unw_addr_space_t libunwind_as;
+		EXITIF(unw_init_remote(&c, libunwind_as, tcp->libunwind_ui) < 0);
+		do {
+			EXITIF(unw_get_reg(&c, UNW_REG_IP, &ip) < 0);
 
-      print_normalized_addr(tcp, ip);
+			print_normalized_addr(tcp, ip);
 
-      ret = unw_step(&c);
+			ret = unw_step(&c);
 
-      if (++n > 255) {
-        /* guard against bad unwind info in old libraries... */
-        fprintf(stderr, "libunwind warning: too deeply nested---assuming bogus unwind\n");
-        break;
-      }
-    } while (ret > 0);
+			if (++n > 255) {
+				/* guard against bad unwind info in old libraries... */
+				fprintf(stderr, "libunwind warning: too deeply nested---assuming bogus unwind\n");
+				break;
+			}
+		} while (ret > 0);
 
 
-    tprintf("] ");
-  }
+		tprintf("] ");
+	}
 
 #else
-  #error "Unknown architecture (not I386 or X86_64)"
+# error "Unknown architecture (not I386 or X86_64)"
 #endif
 
 	printleader(tcp);
@@ -2264,83 +2264,85 @@ trace_syscall_exiting(struct tcb *tcp)
 }
 
 
-// pgbovine - keep a cache of /proc/<pid>/mmap contents to avoid unnecessary reads
+// keep a cache of /proc/<pid>/mmap contents to avoid unnecessary reads
 // make sure it's a SORTED array, so that we can do a fast binary search!
-void alloc_mmap_cache(struct tcb* tcp) {
-  EXITIF(tcp->mmap_cache);
-  EXITIF(tcp->mmap_cache_size); // make sure this starts at zero
+void
+alloc_mmap_cache(struct tcb* tcp) {
+	EXITIF(tcp->mmap_cache);
+	EXITIF(tcp->mmap_cache_size); // make sure this starts at zero
 
-  // start with a small dynamically-allocated array and then use realloc() to
-  // dynamically expand as needed
-  int cur_array_size = 10;
-  struct mmap_cache_t* cache_head = malloc(cur_array_size * sizeof(*cache_head));
+	// start with a small dynamically-allocated array and then use realloc() to
+	// dynamically expand as needed
+	int cur_array_size = 10;
+	struct mmap_cache_t* cache_head = malloc(cur_array_size * sizeof(*cache_head));
 
-  char filename[30];
-  sprintf(filename, "/proc/%d/maps", tcp->pid);
+	char filename[30];
+	sprintf(filename, "/proc/%d/maps", tcp->pid);
 
-  FILE* f = fopen(filename, "r");
-  EXITIF(!f);
-  char s[300];
-  while (fgets(s, sizeof(s), f) != NULL) {
-    unsigned long start_addr, end_addr, mmap_offset;
-    char binary_path[512];
-    binary_path[0] = '\0'; // 'reset' it just to be paranoid
+	FILE* f = fopen(filename, "r");
+	EXITIF(!f);
+	char s[300];
+	while (fgets(s, sizeof(s), f) != NULL) {
+		unsigned long start_addr, end_addr, mmap_offset;
+		char binary_path[512];
+		binary_path[0] = '\0'; // 'reset' it just to be paranoid
 
-    // TODO: add support for paths with SPACES in them ...
-    // right now we assume that filenames have no spaces
-    sscanf(s, "%lx-%lx %*c%*c%*c%*c %lx %*x:%*x %*d %s", &start_addr, &end_addr, &mmap_offset, binary_path);
+		// TODO: add support for paths with SPACES in them ...
+		// right now we assume that filenames have no spaces
+		sscanf(s, "%lx-%lx %*c%*c%*c%*c %lx %*x:%*x %*d %s", &start_addr, &end_addr, &mmap_offset, binary_path);
 
-    // there are some special 'fake files' like "[vdso]", "[heap]", "[stack]",
-    // etc., so simply IGNORE those!
-    if (binary_path[0] == '[' && binary_path[strlen(binary_path) - 1] == ']') {
-      continue;
-    }
+		// there are some special 'fake files' like "[vdso]", "[heap]", "[stack]",
+		// etc., so simply IGNORE those!
+		if (binary_path[0] == '[' && binary_path[strlen(binary_path) - 1] == ']') {
+			continue;
+		}
 
-    // empty string
-    if (binary_path[0] == '\0') {
-      continue;
-    }
+		// ignore empty string
+		if (binary_path[0] == '\0') {
+			continue;
+		}
 
-    EXITIF(end_addr < start_addr);
+		EXITIF(end_addr < start_addr);
 
-    struct mmap_cache_t* cur_entry = &cache_head[tcp->mmap_cache_size];
-    cur_entry->start_addr = start_addr;
-    cur_entry->end_addr = end_addr;
-    cur_entry->mmap_offset = mmap_offset;
-    cur_entry->binary_filename = strdup(binary_path); // need to free later!
+		struct mmap_cache_t* cur_entry = &cache_head[tcp->mmap_cache_size];
+		cur_entry->start_addr = start_addr;
+		cur_entry->end_addr = end_addr;
+		cur_entry->mmap_offset = mmap_offset;
+		cur_entry->binary_filename = strdup(binary_path); // need to free later!
 
-    // sanity check to make sure that we're storing non-overlapping regions in
-    // ascending order:
-    if (tcp->mmap_cache_size > 0) {
-      struct mmap_cache_t* prev_entry = &cache_head[tcp->mmap_cache_size - 1];
-      EXITIF(prev_entry->start_addr >= cur_entry->start_addr);
-      EXITIF(prev_entry->end_addr > cur_entry->start_addr); // could be ==
-    }
+		// sanity check to make sure that we're storing non-overlapping regions in
+		// ascending order:
+		if (tcp->mmap_cache_size > 0) {
+			struct mmap_cache_t* prev_entry = &cache_head[tcp->mmap_cache_size - 1];
+			EXITIF(prev_entry->start_addr >= cur_entry->start_addr);
+			EXITIF(prev_entry->end_addr > cur_entry->start_addr); // could be ==
+		}
 
-    tcp->mmap_cache_size++;
+		tcp->mmap_cache_size++;
 
-    // resize:
-    if (tcp->mmap_cache_size >= cur_array_size) {
-      cur_array_size *= 2; // double in size!
-      cache_head = realloc(cache_head, cur_array_size * sizeof(*cache_head));
-    }
-  }
-  fclose(f);
+		// resize:
+		if (tcp->mmap_cache_size >= cur_array_size) {
+			cur_array_size *= 2; // double in size!
+			cache_head = realloc(cache_head, cur_array_size * sizeof(*cache_head));
+		}
+	}
+	fclose(f);
 
-  tcp->mmap_cache = cache_head;
+	tcp->mmap_cache = cache_head;
 }
 
-// pgbovine - remember to delete the mmap cache at the END of any system calls
+// remember to delete the mmap cache at the END of any system calls
 // that might change /proc/<pid>/mmap
 // examples of such system calls include: mmap, mprotect, munmap, execve
-void delete_mmap_cache(struct tcb* tcp) {
-  int i;
-  for (i = 0; i < tcp->mmap_cache_size; i++) {
-    free(tcp->mmap_cache[i].binary_filename);
-  }
-  free(tcp->mmap_cache);
-  tcp->mmap_cache = NULL;
-  tcp->mmap_cache_size = 0;
+void
+delete_mmap_cache(struct tcb* tcp) {
+	int i;
+	for (i = 0; i < tcp->mmap_cache_size; i++) {
+		free(tcp->mmap_cache[i].binary_filename);
+	}
+	free(tcp->mmap_cache);
+	tcp->mmap_cache = NULL;
+	tcp->mmap_cache_size = 0;
 }
 
 
@@ -2352,37 +2354,38 @@ void delete_mmap_cache(struct tcb* tcp) {
 // TODO: this currently doesn't properly handle paths with SPACES in them!
 //
 // Pre-condition: tcp->mmap_cache is already initialized
-static void print_normalized_addr(struct tcb* tcp, unsigned long addr) {
-  EXITIF(!tcp->mmap_cache);
+static void
+print_normalized_addr(struct tcb* tcp, unsigned long addr) {
+	EXITIF(!tcp->mmap_cache);
 
-  // since tcp->mmap_cache is sorted, do a binary search to find the cache entry
-  // that contains addr
-  int lower = 0;
-  int upper = tcp->mmap_cache_size;
+	// since tcp->mmap_cache is sorted, do a binary search to find the cache entry
+	// that contains addr
+	int lower = 0;
+	int upper = tcp->mmap_cache_size;
 
-  while (lower <= upper) {
-    int mid = (int)((upper + lower) / 2);
-    struct mmap_cache_t* cur = &tcp->mmap_cache[mid];
+	while (lower <= upper) {
+		int mid = (int)((upper + lower) / 2);
+		struct mmap_cache_t* cur = &tcp->mmap_cache[mid];
 
-    if (addr >= cur->start_addr && addr < cur->end_addr) {
-      // calculate the true offset into the binary ...
-      // but still print out the original address because it can be useful too ...
-      unsigned long true_offset = addr - cur->start_addr + cur->mmap_offset;
-      tprintf("%s:0x%lx:0x%lx ", cur->binary_filename, true_offset, addr);
-      return; // exit early
-    }
-    else if (lower == upper) {
-      // still can't find the entry, so just exit!
-      EXITIF(!(lower == mid)); // sanity check
-      return;
-    }
-    else if (addr < cur->start_addr) {
-      upper = mid - 1;
-    }
-    else {
-      lower = mid + 1;
-    }
-  }
+		if (addr >= cur->start_addr && addr < cur->end_addr) {
+			// calculate the true offset into the binary ...
+			// but still print out the original address because it can be useful too ...
+			unsigned long true_offset = addr - cur->start_addr + cur->mmap_offset;
+			tprintf("%s:0x%lx:0x%lx ", cur->binary_filename, true_offset, addr);
+			return; // exit early
+		}
+		else if (lower == upper) {
+			// still can't find the entry, so just exit!
+			EXITIF(!(lower == mid)); // sanity check
+			return;
+		}
+		else if (addr < cur->start_addr) {
+			upper = mid - 1;
+		}
+		else {
+			lower = mid + 1;
+		}
+	}
 
 }
 
