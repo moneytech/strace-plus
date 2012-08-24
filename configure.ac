@@ -279,6 +279,15 @@ AC_CACHE_CHECK([for BLKGETSIZE64], [ac_cv_have_blkgetsize64],
 AC_CHECK_SIZEOF([long])
 AC_CHECK_SIZEOF([rlim_t],,[#include <sys/resource.h>])
 
+AC_CHECK_LIB()
+if test "$arch" = "x86_64"; then
+  AC_CHECK_LIB(unwind-x86_64,_Ux86_64_init_local,[],[AC_MSG_ERROR("libunwind-x86_64 library could not be found!")])
+fi
+if test "$arch" = "i386"; then
+  AC_CHECK_LIB(unwind,_UPT_create,[],[AC_MSG_ERROR("libunwind library could not be found!")])
+fi
+AC_CHECK_LIB(unwind-ptrace,_UPT_create,[],[AC_MSG_ERROR("libunwind-ptrace library could not be found!")])
+
 AC_PATH_PROG([PERL], [perl])
 
 AC_CONFIG_FILES([Makefile tests/Makefile])

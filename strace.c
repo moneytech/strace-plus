@@ -61,6 +61,10 @@ extern char *optarg;
 #undef KERNEL_VERSION
 #define KERNEL_VERSION(a,b,c) (((a) << 16) + ((b) << 8) + (c))
 
+// integrate libunwind into strace ... from libunwind-1.0/tests/test-ptrace.c
+unw_addr_space_t libunwind_as;
+
+
 cflag_t cflag = CFLAG_NONE;
 unsigned int followfork = 0;
 unsigned int ptrace_setoptions = 0;
@@ -669,6 +673,12 @@ alloctcb(int pid)
 			memset(tcp, 0, sizeof(*tcp));
 			tcp->pid = pid;
 			tcp->flags = TCB_INUSE;
+
+                        tcp->mmap_cache = NULL; // pgbovine
+                        tcp->mmap_cache_size = 0; // pgbovine
+
+                        tcp->libunwind_ui = _UPT_create(tcp->pid); // pgbovine
+
 #if SUPPORTED_PERSONALITIES > 1
 			tcp->currpers = current_personality;
 #endif
@@ -702,6 +712,9 @@ droptcb(struct tcb *tcp)
 			fflush(tcp->outf);
 		}
 	}
+
+        delete_mmap_cache(tcp); // pgbovine
+        _UPT_destroy(tcp->libunwind_ui);  // pgbovine
 
 	if (current_tcp == tcp)
 		current_tcp = NULL;
@@ -1461,6 +1474,13 @@ init(int argc, char *argv[])
 	int optF = 0;
 	struct sigaction sa;
 
+        // pgbovine - libunwind support:
+        libunwind_as = unw_create_addr_space (&_UPT_accessors, 0);
+        if (!libunwind_as) {
+          fprintf(stderr, "Fatal error: unw_create_addr_space() from libunwind failed\n");
+          exit(1);
+        }
+
 	progname = argv[0] ? argv[0] : "strace";
 
 	/* Make sure SIGCHLD has the default action so that waitpid
@@ -1980,6 +2000,9 @@ trace(void)
 			/* Switch to the thread, reusing leader's outfile and pid */
 			tcp = execve_thread;
 			tcp->pid = pid;
+
+			// TODO: Need to modify libunwind_ui here?
+
 			if (cflag != CFLAG_ONLY_STATS) {
 				printleader(tcp);
 				tprintf("+++ superseded by execve in pid %lu +++\n", old_pid);
