@@ -977,6 +977,11 @@ sys_execve(struct tcb *tcp)
 			tprints("]");
 		}
 	}
+
+	if (!entering(tcp)) {
+		delete_mmap_cache(tcp);
+	}
+
 	return 0;
 }
 

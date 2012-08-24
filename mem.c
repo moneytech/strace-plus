@@ -315,7 +315,13 @@ sys_mmap(struct tcb *tcp)
 	 * sys_mmap_pgoff(..., off >> PAGE_SHIFT); i.e. off is in bytes,
 	 * since the above code converts off to pages.
 	 */
-	return print_mmap(tcp, tcp->u_arg, offset);
+	int ret = print_mmap(tcp, tcp->u_arg, offset);
+
+	if (!entering(tcp)) {
+		delete_mmap_cache(tcp);
+	}
+
+	return ret;
 }
 
 /* Params are passed directly, offset is in pages */
@@ -346,6 +352,11 @@ sys_munmap(struct tcb *tcp)
 		tprintf("%#lx, %lu",
 			tcp->u_arg[0], tcp->u_arg[1]);
 	}
+
+	if (!entering(tcp)) {
+		delete_mmap_cache(tcp);
+	}
+
 	return 0;
 }
 
@@ -357,6 +368,11 @@ sys_mprotect(struct tcb *tcp)
 			tcp->u_arg[0], tcp->u_arg[1]);
 		printflags(mmap_prot, tcp->u_arg[2], "PROT_???");
 	}
+
+	if (!entering(tcp)) {
+		delete_mmap_cache(tcp);
+	}
+
 	return 0;
 }
 
