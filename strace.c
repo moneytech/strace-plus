@@ -142,6 +142,9 @@ static char *outfname = NULL;
 /* If -ff, points to stderr. Else, it's our common output log */
 static FILE *shared_log;
 
+int output_stacktraces = 0;
+int use_libunwind = 1;
+
 struct tcb *printing_tcp = NULL;
 static struct tcb *current_tcp;
 
@@ -225,6 +228,9 @@ usage: strace [-CdffhiqrtttTvVxxy] [-I n] [-e expr]...\n\
 -E var=val -- put var=val in the environment for command\n\
 -E var -- remove var from the environment for command\n\
 -P path -- trace accesses to path\n\
+-k -- obtain stack traces (using libunwind by default, if compiled with it)\n\
+-w -- obtain stack trace by walking up the frame pointer chain\n\
+      rather than using libunwind (FASTER but requires frame pointers!)\n\
 "
 /* this is broken, so don't document it
 -z -- print only succeeding syscalls\n\
@@ -677,7 +683,8 @@ alloctcb(int pid)
 			tcp->mmap_cache = NULL;
 			tcp->mmap_cache_size = 0;
 
-			tcp->libunwind_ui = _UPT_create(tcp->pid);
+			if (use_libunwind)
+				tcp->libunwind_ui = _UPT_create(tcp->pid);
 
 #if SUPPORTED_PERSONALITIES > 1
 			tcp->currpers = current_personality;
@@ -714,7 +721,8 @@ droptcb(struct tcb *tcp)
 	}
 
 	delete_mmap_cache(tcp);
-	_UPT_destroy(tcp->libunwind_ui);
+	if (use_libunwind)
+		_UPT_destroy(tcp->libunwind_ui);
 
 	if (current_tcp == tcp)
 		current_tcp = NULL;
@@ -1474,11 +1482,13 @@ init(int argc, char *argv[])
 	int optF = 0;
 	struct sigaction sa;
 
-	/* Create libunwind address space for the process */
-	libunwind_as = unw_create_addr_space(&_UPT_accessors, 0);
-	if (!libunwind_as) {
-		fprintf(stderr, "Fatal error: unw_create_addr_space() from libunwind failed\n");
-		exit(1);
+	if (use_libunwind) {
+		/* Create libunwind address space for the process */
+		libunwind_as = unw_create_addr_space(&_UPT_accessors, 0);
+		if (!libunwind_as) {
+			fprintf(stderr, "Fatal error: unw_create_addr_space() from libunwind failed\n");
+			exit(1);
+		}
 	}
 
 	progname = argv[0] ? argv[0] : "strace";
@@ -1513,7 +1523,7 @@ init(int argc, char *argv[])
 	qualify("verbose=all");
 	qualify("signal=all");
 	while ((c = getopt(argc, argv,
-		"+bcCdfFhiqrtTvVxyz"
+		"+bcCdfFhiqrtTvVxyzkw"
 		"D"
 		"a:e:o:O:p:s:S:u:E:P:I:")) != EOF) {
 		switch (c) {
@@ -1624,6 +1634,12 @@ init(int argc, char *argv[])
 			opt_intr = string_to_uint(optarg);
 			if (opt_intr <= 0 || opt_intr >= NUM_INTR_OPTS)
 				error_opt_arg(c, optarg);
+			break;
+		case 'k':
+			output_stacktraces = 1;
+			break;
+		case 'w':
+			use_libunwind = 0;
 			break;
 		default:
 			usage(stderr, 1);
