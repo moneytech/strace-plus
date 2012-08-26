@@ -1496,12 +1496,13 @@ get_syscall_args(struct tcb *tcp)
 	return 1;
 }
 
-extern int output_stacktraces;
-extern int use_libunwind;
-extern unw_addr_space_t libunwind_as;
-
 static void
 print_normalized_addr(struct tcb* tcp, unsigned long addr);
+
+extern int output_stacktraces;
+extern int use_libunwind;
+#ifdef LIBUNWIND
+extern unw_addr_space_t libunwind_as;
 
 // use libunwind to unwind the stack and print a backtrace:
 static void
@@ -1526,6 +1527,8 @@ print_libunwind_backtrace(struct tcb* tcp)
 		}
 	} while (ret > 0);
 }
+
+#endif
 
 static void
 print_i386_ebp_backtrace(struct tcb* tcp)
@@ -1575,24 +1578,32 @@ output_stacktrace(struct tcb* tcp)
 
 #if defined (I386)
 
+# ifdef LIBUNWIND
 	if (use_libunwind) {
 		// use libunwind to unwind the stack, which works even for code compiled
 		// without a frame pointer, but is relatively SLOW
 		print_libunwind_backtrace(tcp);
 	} else {
+# endif
 		print_i386_ebp_backtrace(tcp);
+# ifdef LIBUNWIND
 	}
+# endif
 
 #elif defined(X86_64)
 
+# ifdef LIBUNWIND
 	// a 64-bit version of libunwind can't parse 32-bit binaries, so we MUST
 	// resort to using stack crawling when tracking a 32-bit binary:
 	if (IS_32BIT_EMU || !use_libunwind) {
+# endif
 		print_i386_ebp_backtrace(tcp);
+# ifdef LIBUNWIND
 	} else if (use_libunwind) {
 		// use libunwind
 		print_libunwind_backtrace(tcp);
 	}
+# endif
 
 #else
 # error "Unknown architecture (not I386 or X86_64)"

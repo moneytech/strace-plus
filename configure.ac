@@ -280,13 +280,21 @@ AC_CHECK_SIZEOF([long])
 AC_CHECK_SIZEOF([rlim_t],,[#include <sys/resource.h>])
 
 AC_CHECK_LIB()
-if test "$arch" = "x86_64"; then
-  AC_CHECK_LIB(unwind-x86_64,_Ux86_64_init_local,[],[AC_MSG_ERROR("libunwind-x86_64 library could not be found!")])
-fi
-if test "$arch" = "i386"; then
-  AC_CHECK_LIB(unwind,_UPT_create,[],[AC_MSG_ERROR("libunwind library could not be found!")])
-fi
-AC_CHECK_LIB(unwind-ptrace,_UPT_create,[],[AC_MSG_ERROR("libunwind-ptrace library could not be found!")])
+
+AC_ARG_WITH([libunwind], [AS_HELP_STRING([--without-libunwind],
+            [disable support for libunwind])],
+            [],
+            [with_libunwind=yes])
+          
+AS_IF([test "x$with_libunwind" != xno],
+	[
+		if test "$arch" = "x86_64"; then
+			AC_CHECK_LIB(unwind-x86_64,_Ux86_64_init_local,[],[AC_MSG_NOTICE("libunwind-x86_64 library could not be found!")])
+		elif test "$arch" = "i386"; then
+			AC_CHECK_LIB(unwind,_ULx86_init_local,[],[AC_MSG_NOTICE("libunwind library could not be found!")])
+		fi
+		AC_CHECK_LIB(unwind-ptrace,_UPT_create,[],[AC_MSG_NOTICE("libunwind-ptrace library could not be found!")])
+	])
 
 AC_PATH_PROG([PERL], [perl])
 

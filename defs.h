@@ -324,9 +324,12 @@ extern long ia32;
 #endif
 
 
+#if (defined(HAVE_LIBUNWIND) || defined(HAVE_LIBUNWIND_X86_64)) && defined(HAVE_LIBUNWIND_PTRACE)
+# define LIBUNWIND
 // put this #include as LATE in the file as possible, or else there might be
 // include conflicts
-#include "libunwind-ptrace.h"
+# include "libunwind-ptrace.h"
+#endif
 
 // like an assert except that it always fires, even in release builds
 #define EXITIF(x) do { \
